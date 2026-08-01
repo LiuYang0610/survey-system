@@ -1,4 +1,4 @@
-﻿// 后台管理路由（KV 版）
+// 后台管理路由（KV 版）
 import { Hono } from 'hono';
 import { generateId, generateUniqueKey } from '../lib/uuid';
 import { authMiddleware } from '../middleware/auth';

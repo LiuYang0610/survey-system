@@ -1,5 +1,5 @@
 ﻿# ============================================
-# 🚀 问卷系统一键部署脚本（KV 版）
+# 🚀 问卷系统一键部署脚本（KV 版 - 修复）
 # ============================================
 
 $ErrorActionPreference = "Stop"
@@ -38,7 +38,6 @@ Write-Host $kvOutput
 $kvLine = $kvOutput | Select-String 'id\s*=\s*"([^"]+)"'
 if (-not $kvLine) {
     Write-Host "❌ 无法获取 KV namespace ID" -ForegroundColor Red
-    Write-Host "请手动在 Cloudflare Dashboard 创建 KV 命名空间，然后更新 wrangler.toml" -ForegroundColor Yellow
     exit 1
 }
 $kvId = $kvLine.Matches[0].Groups[1].Value
@@ -49,30 +48,26 @@ Write-Host ""
 Write-Host "📝 更新 wrangler.toml..." -ForegroundColor Yellow
 $content = Get-Content wrangler.toml -Raw
 $content = $content -replace 'YOUR_KV_NAMESPACE_ID', $kvId
-Set-Content wrangler.toml -Value $content -NoNewline
+[System.IO.File]::WriteAllText("wrangler.toml", $content, [System.Text.UTF8Encoding]::new($false))
 Write-Host "  ✅ 配置已更新" -ForegroundColor Green
 
-# 部署 Worker
+# 部署 Worker（不加 --no-bundle，让 Wrangler 自动编译 TypeScript）
 Write-Host ""
 Write-Host "🚀 部署 Worker API..." -ForegroundColor Yellow
-wrangler deploy --no-bundle
+wrangler deploy
 Write-Host "  ✅ Worker 已部署" -ForegroundColor Green
 
 # 初始化默认管理员
 Write-Host ""
 Write-Host "👤 初始化管理员账号..." -ForegroundColor Yellow
-# 从 wrangler.toml 读取 Worker 名称
 $workerName = (Select-String -Path wrangler.toml -Pattern '^name\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 $workerUrl = "https://${workerName}.workers.dev"
-Write-Host "  调用 $workerUrl/api/init ..." -ForegroundColor Gray
-
-# 等待 Worker 部署生效
 Start-Sleep -Seconds 3
 try {
     $initResult = Invoke-RestMethod -Uri "$workerUrl/api/init" -Method Get
     Write-Host "  ✅ $($initResult.message)" -ForegroundColor Green
 } catch {
-    Write-Host "  ⚠️ 初始化请求失败，请稍后手动访问: $workerUrl/api/init" -ForegroundColor Yellow
+    Write-Host "  ⚠️ 请稍后手动访问: $workerUrl/api/init" -ForegroundColor Yellow
 }
 
 # 构建前端
@@ -90,7 +85,6 @@ Write-Host "🚀 部署前端到 Cloudflare Pages..." -ForegroundColor Yellow
 wrangler pages deploy web/dist --project-name survey-system
 Write-Host "  ✅ 前端已部署" -ForegroundColor Green
 
-# 完成
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  🎉 部署完成！" -ForegroundColor Green
@@ -99,6 +93,4 @@ Write-Host ""
 Write-Host "  📋 后台管理: https://survey-system.pages.dev/admin" -ForegroundColor Cyan
 Write-Host "  🌐 Worker API: $workerUrl" -ForegroundColor Cyan
 Write-Host "  🔑 登录账号: admin / admin123456" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  ⚠️ 请尽快修改默认管理员密码！" -ForegroundColor Yellow
 Write-Host ""

@@ -1,4 +1,4 @@
-﻿name = "survey-system"
+name = "survey-system"
 main = "src/index.ts"
 compatibility_date = "2024-06-01"
 compatibility_flags = ["nodejs_compat"]
@@ -8,4 +8,4 @@ JWT_SECRET = "change-me-in-production-use-wrangler-secret"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "3e1bbab1f5ed426dbf06083d630fabe8"

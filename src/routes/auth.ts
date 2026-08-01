@@ -1,4 +1,4 @@
-﻿// 管理员认证路由（KV 版）
+// 管理员认证路由（KV 版）
 import { Hono } from 'hono';
 import { signJwt, verifyJwt } from '../lib/jwt';
 import { generateId } from '../lib/uuid';

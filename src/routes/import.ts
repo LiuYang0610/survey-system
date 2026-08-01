@@ -1,4 +1,4 @@
-﻿// 文件导入路由（KV 版 - 内存解析，无需 R2）
+// 文件导入路由（KV 版 - 内存解析，无需 R2）
 import { Hono } from 'hono';
 import { generateId } from '../lib/uuid';
 import { authMiddleware } from '../middleware/auth';

@@ -1,4 +1,4 @@
-﻿// API 客户端工具
+// API 客户端工具
 
 const API_BASE = '/api';
 

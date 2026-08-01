@@ -1,4 +1,4 @@
-﻿// JWT 工具（Cloudflare Workers 兼容）
+// JWT 工具（Cloudflare Workers 兼容）
 import type { JwtPayload } from '../types';
 
 // Base64 URL 编码

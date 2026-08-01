@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "survey-system-web",
   "version": "1.0.0",
   "private": true,
@@ -12,8 +12,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.23.0",
-    "recharts": "^2.12.0",
-    "xlsx": "^0.18.5"
+    "recharts": "^2.12.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",

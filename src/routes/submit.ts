@@ -1,4 +1,4 @@
-﻿// 答卷提交路由（KV 版）
+// 答卷提交路由（KV 版）
 import { Hono } from 'hono';
 import { generateId } from '../lib/uuid';
 import { kvGet, kvPut, kvDelete, kvListAppend, KVKeys } from '../lib/store';

@@ -1,4 +1,4 @@
-﻿// JWT 鉴权中间件
+// JWT 鉴权中间件
 import { Context, Next } from 'hono';
 import { verifyJwt } from '../lib/jwt';
 import type { Env, JwtPayload } from '../types';

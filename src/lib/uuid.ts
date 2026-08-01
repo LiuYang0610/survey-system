@@ -1,4 +1,4 @@
-﻿// UUID v4 生成（不依赖 crypto.randomUUID 的兼容实现）
+// UUID v4 生成（不依赖 crypto.randomUUID 的兼容实现）
 export function generateId(): string {
   return crypto.randomUUID();
 }

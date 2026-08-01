@@ -1,4 +1,4 @@
-﻿// 前台公开访问路由（KV 版）
+// 前台公开访问路由（KV 版）
 import { Hono } from 'hono';
 import { kvGet, kvPut, KVKeys } from '../lib/store';
 import type { Env, Survey, SurveyStats } from '../types';

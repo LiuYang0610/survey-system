@@ -1,4 +1,4 @@
-﻿// 草稿管理路由（KV 版）
+// 草稿管理路由（KV 版）
 import { Hono } from 'hono';
 import { kvGet, kvPut, kvDelete, KVKeys } from '../lib/store';
 import type { Env, Draft } from '../types';
