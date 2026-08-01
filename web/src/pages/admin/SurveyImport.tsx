@@ -1,6 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getImportPresign, uploadFile, parseImportFile, confirmImport } from '../../lib/api';
+import { uploadAndParseFile, confirmImport } from '../../lib/api';
 
 interface ParsedQuestion {
   sort_order: number;
@@ -21,7 +21,7 @@ export default function SurveyImport() {
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
-  const [importId, setImportId] = useState('');
+  
   const [uploading, setUploading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [title, setTitle] = useState('');
@@ -61,20 +61,12 @@ export default function SurveyImport() {
     if (!file) return;
     
     setUploading(true);
+    setParsing(true);
     setError('');
     
     try {
-      // 1. 获取预签名 URL
-      const presignData = await getImportPresign(file.name, file.type);
-      setImportId(presignData.import_id);
-      
-      // 2. 上传文件
-      await uploadFile(presignData.import_id, file);
-      setUploading(false);
-      
-      // 3. 解析文件
-      setParsing(true);
-      const parseData = await parseImportFile(presignData.import_id);
+      // 直接上传并解析
+      const parseData = await uploadAndParseFile(file);
       setTitle(parseData.title);
       setQuestions(parseData.questions.map(q => ({
         ...q,
@@ -114,7 +106,6 @@ export default function SurveyImport() {
     setSaving(true);
     try {
       await confirmImport({
-        import_id: importId,
         title,
         description,
         questions: questions.map(q => ({
@@ -600,3 +591,4 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 20,
   },
 };
+

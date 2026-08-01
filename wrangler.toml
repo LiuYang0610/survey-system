@@ -5,19 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 JWT_SECRET = "change-me-in-production-use-wrangler-secret"
-ADMIN_DEFAULT_PASSWORD = "admin123456"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "survey-db"
-database_id = "YOUR_D1_DATABASE_ID"
-
-[[r2_buckets]]
-binding = "R2"
-bucket_name = "survey-files"
-
-[build]
-command = "cd web && npx vite build"
-
-[site]
-bucket = "./web/dist"
+[[kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID"

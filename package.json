@@ -6,19 +6,13 @@
   "scripts": {
     "dev:worker": "wrangler dev",
     "dev:web": "cd web && npx vite --port 3000",
-    "dev": "concurrently \"npm run dev:worker\" \"npm run dev:web\"",
     "build:web": "cd web && npx vite build",
-    "deploy": "npm run build:web && wrangler pages deploy web/dist --project-name survey-system",
-    "db:init": "wrangler d1 execute survey-db --file=schema.sql",
-    "db:init:local": "wrangler d1 execute survey-db --local --file=schema.sql",
-    "db:seed": "wrangler d1 execute survey-db --file=seed.sql",
-    "db:seed:local": "wrangler d1 execute survey-db --local --file=seed.sql"
+    "deploy": "wrangler deploy --no-bundle",
+    "deploy:pages": "wrangler pages deploy web/dist --project-name survey-system",
+    "init-admin": "curl https://survey-system.workers.dev/api/init"
   },
   "dependencies": {
-    "hono": "^4.4.0",
-    "@hono/node-server": "^1.11.0",
-    "exceljs": "^4.4.0",
-    "mammoth": "^1.8.0"
+    "hono": "^4.4.0"
   },
   "devDependencies": {
     "wrangler": "^3.60.0",
@@ -31,6 +25,8 @@
     "react-router-dom": "^6.23.0",
     "recharts": "^2.12.0",
     "concurrently": "^8.2.0",
+    "exceljs": "^4.4.0",
+    "mammoth": "^1.8.0",
     "unpdf": "^0.14.0"
   }
 }

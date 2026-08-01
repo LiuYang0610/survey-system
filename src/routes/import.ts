@@ -1,155 +1,196 @@
-﻿// 文件导入路由
+﻿// 文件导入路由（KV 版 - 内存解析，无需 R2）
 import { Hono } from 'hono';
 import { generateId } from '../lib/uuid';
 import { authMiddleware } from '../middleware/auth';
-import { parseExcel } from '../lib/parser-excel';
-import { parseWord } from '../lib/parser-word';
-import { parsePdf } from '../lib/parser-pdf';
-import { readFromR2 } from '../lib/r2';
-import type { Env } from '../types';
+import { kvGet, kvPut, KVKeys } from '../lib/store';
+import type { Env, Survey, Question } from '../types';
 
 const importRoutes = new Hono<{ Bindings: Env }>();
 importRoutes.use('*', authMiddleware());
 
-// POST /api/admin/import/presign - 生成 R2 预签名上传 URL
-importRoutes.post('/presign', async (c) => {
-  const { filename, content_type } = await c.req.json<{
-    filename: string;
-    content_type: string;
-  }>();
-  
-  // 验证文件类型
-  const allowedTypes: Record<string, string> = {
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-    'application/pdf': 'pdf',
-  };
-  
-  const fileType = allowedTypes[content_type];
-  if (!fileType) {
-    return c.json({ error: '不支持的文件格式，请上传 .xlsx / .docx / .pdf 文件' }, 400);
-  }
-  
-  const fileId = generateId();
-  const r2Key = `imports/${fileId}/${filename}`;
-  
-  // 存储导入记录
-  await c.env.DB.prepare(
-    'INSERT INTO import_files (id, file_name, file_url, file_type, status) VALUES (?, ?, ?, ?, ?)'
-  ).bind(fileId, filename, r2Key, fileType, 'uploaded').run();
-  
-  // 生成预签名 URL（用于前端直传 R2）
-  // 在 Cloudflare 环境中，R2 支持 presigned URL
-  // 这里返回上传配置，前端通过 Worker 中转上传
-  return c.json({
-    import_id: fileId,
-    r2_key: r2Key,
-    upload_url: `/api/admin/import/upload/${fileId}`,
-    message: '预签名 URL 已生成',
-  });
-});
+// 通用文本清洗
+function cleanText(text: string): string {
+  return text
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(l => l.length > 0)
+    .join('\n');
+}
 
-// POST /api/admin/import/upload/:id - 通过 Worker 中转上传文件到 R2
-importRoutes.post('/upload/:id', async (c) => {
-  const importId = c.req.param('id');
-  
-  const importFile = await c.env.DB.prepare(
-    'SELECT * FROM import_files WHERE id = ?'
-  ).bind(importId).first();
-  
-  if (!importFile) {
-    return c.json({ error: '导入记录不存在' }, 404);
+// 解析问卷文本
+function parseSurveyText(text: string) {
+  const lines = cleanText(text).split('\n');
+  if (lines.length === 0) throw new Error('文档内容为空');
+
+  const title = lines[0].replace(/^[#\s]+/, '').trim();
+  let description = '';
+  let startIdx = 1;
+
+  if (lines.length > 1 && !/^\d+[、.．]/.test(lines[1])) {
+    description = lines[1].trim();
+    startIdx = 2;
   }
-  
-  // 获取请求体（文件数据）
+
+  const questions: any[] = [];
+  let current: any = null;
+  let currentOptions: string[] = [];
+
+  const qRegex = /^(\d+)[、.．]\s*(.+)/;
+  const typeRegex = /【(单选|多选|填空|量表)】/;
+  const reqRegex = /【必填】/;
+  const optRegex = /^[A-Za-z]\s*[、.．]\s*(.+)/;
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+    const qMatch = line.match(qRegex);
+
+    if (qMatch) {
+      if (current) { current.options = currentOptions; questions.push(current); }
+      let qTitle = qMatch[2];
+      let type: any = 'single';
+      let required = false;
+
+      const tm = qTitle.match(typeRegex);
+      if (tm) {
+        const map: Record<string, string> = { '单选': 'single', '多选': 'multiple', '填空': 'text', '量表': 'scale' };
+        type = map[tm[1]] || 'single';
+        qTitle = qTitle.replace(typeRegex, '').trim();
+      }
+      if (reqRegex.test(qTitle)) { required = true; qTitle = qTitle.replace(reqRegex, '').trim(); }
+
+      current = {
+        sort_order: parseInt(qMatch[1]),
+        type, title: qTitle, description: '', required,
+        options: [], scale_min: 1, scale_max: 5,
+        scale_min_label: '非常不满意', scale_max_label: '非常满意',
+      };
+      currentOptions = [];
+      continue;
+    }
+
+    if (current && optRegex.test(line)) {
+      const m = line.match(optRegex);
+      if (m) currentOptions.push(m[1].trim());
+    }
+  }
+
+  if (current) { current.options = currentOptions; questions.push(current); }
+  return { title, description, questions };
+}
+
+// 上传并解析（前端通过 FormData 上传文件）
+importRoutes.post('/upload', async (c) => {
   const formData = await c.req.formData();
   const file = formData.get('file') as File;
-  
-  if (!file) {
-    return c.json({ error: '未找到上传文件' }, 400);
+  if (!file) return c.json({ error: '未找到文件' }, 400);
+
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  if (!['xlsx', 'docx', 'pdf'].includes(ext || '')) {
+    return c.json({ error: '仅支持 .xlsx / .docx / .pdf 格式' }, 400);
   }
-  
-  // 验证文件大小（最大 10MB）
   if (file.size > 10 * 1024 * 1024) {
-    return c.json({ error: '文件大小不能超过 10MB' }, 400);
+    return c.json({ error: '文件不能超过 10MB' }, 400);
   }
-  
-  // 上传到 R2
-  const buffer = await file.arrayBuffer();
-  await c.env.R2.put(importFile.file_url as string, buffer, {
-    httpMetadata: {
-      contentType: file.type,
-    },
-  });
-  
-  return c.json({
-    message: '文件上传成功',
-    import_id: importId,
-  });
+
+  try {
+    const buffer = await file.arrayBuffer();
+    let text = '';
+
+    if (ext === 'xlsx') {
+      // 动态导入 exceljs
+      const ExcelJS = (await import('exceljs')).default;
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer);
+      const sheet = workbook.worksheets[0];
+      if (!sheet) throw new Error('Excel 文件无工作表');
+      const lines: string[] = [];
+      sheet.eachRow((row) => {
+        const cells: string[] = [];
+        row.eachCell((cell) => { if (cell.value != null) cells.push(String(cell.value)); });
+        if (cells.length > 0) lines.push(cells.join(' | '));
+      });
+      text = lines.join('\n');
+    } else if (ext === 'docx') {
+      const mammoth = (await import('mammoth')).default;
+      const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+      text = result.value;
+    } else if (ext === 'pdf') {
+      const { getDocumentProxy } = await import('unpdf');
+      const pdf = await getDocumentProxy(new Uint8Array(buffer));
+      const lines: string[] = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => item.str).join(' ').trim();
+        if (pageText) lines.push(pageText);
+      }
+      text = lines.join('\n');
+    }
+
+    if (!text || text.trim().length === 0) {
+      return c.json({ error: '文件内容为空，或为扫描件/图片PDF' }, 400);
+    }
+
+    const parsed = parseSurveyText(text);
+    return c.json({ title: parsed.title, description: parsed.description, questions: parsed.questions });
+  } catch (err: any) {
+    return c.json({ error: `解析失败: ${err.message}` }, 400);
+  }
 });
 
-// POST /api/admin/import/parse/:id - 解析已上传的文件
-importRoutes.post('/parse/:id', async (c) => {
-  const importId = c.req.param('id');
-  
-  const importFile = await c.env.DB.prepare(
-    'SELECT * FROM import_files WHERE id = ?'
-  ).bind(importId).first();
-  
-  if (!importFile) {
-    return c.json({ error: '导入记录不存在' }, 404);
-  }
-  
-  if (importFile.status === 'confirmed') {
-    return c.json({ error: '该文件已确认导入，不能重复解析' }, 400);
-  }
-  
-  // 从 R2 读取文件
-  const data = await readFromR2(c.env.R2, importFile.file_url as string);
-  if (!data) {
-    return c.json({ error: '文件读取失败' }, 500);
-  }
-  
-  try {
-    let parsed;
-    
-    switch (importFile.file_type) {
-      case 'xlsx':
-        parsed = await parseExcel(data.buffer);
-        break;
-      case 'docx':
-        parsed = await parseWord(data.buffer);
-        break;
-      case 'pdf':
-        parsed = await parsePdf(data.buffer);
-        break;
-      default:
-        return c.json({ error: '不支持的文件类型' }, 400);
-    }
-    
-    // 更新解析结果
-    await c.env.DB.prepare(
-      "UPDATE import_files SET status = 'parsed', parsed_data = ? WHERE id = ?"
-    ).bind(JSON.stringify(parsed.questions), importId).run();
-    
-    return c.json({
-      import_id: importId,
-      title: parsed.title,
-      description: parsed.description,
-      questions: parsed.questions,
-      message: '文件解析成功',
-    });
-  } catch (error: any) {
-    // 解析失败
-    await c.env.DB.prepare(
-      "UPDATE import_files SET status = 'failed', error_message = ? WHERE id = ?"
-    ).bind(error.message, importId).run();
-    
-    return c.json({
-      error: `文件解析失败: ${error.message}`,
-      hint: '请检查文件格式是否符合规范',
-    }, 400);
-  }
+// 确认导入创建问卷
+importRoutes.post('/confirm', async (c) => {
+  const { title, description, questions } = await c.req.json<{
+    title: string; description?: string; questions: any[];
+  }>();
+  if (!title || !questions?.length) return c.json({ error: '请提供标题和题目' }, 400);
+
+  const surveyId = generateId();
+  const uniqueKey = generateUniqueKey();
+  const now = new Date().toISOString();
+
+  const survey: Survey = {
+    id: surveyId,
+    unique_key: uniqueKey,
+    title,
+    description: description || '',
+    status: 'active',
+    allow_resubmit: 0,
+    created_by: c.get('admin').username,
+    created_at: now,
+    updated_at: now,
+    questions: questions.map((q: any, idx: number) => ({
+      id: generateId(),
+      sort_order: q.sort_order || idx + 1,
+      type: q.type,
+      title: q.title,
+      description: q.description || '',
+      required: q.required ? 1 : 0,
+      options: q.options || [],
+      scale_min: q.scale_min || 1,
+      scale_max: q.scale_max || 5,
+      scale_min_label: q.scale_min_label || '非常不满意',
+      scale_max_label: q.scale_max_label || '非常满意',
+    })),
+  };
+
+  await kvPut(c.env.KV, KVKeys.survey(surveyId), survey);
+  await kvPut(c.env.KV, KVKeys.surveyByKey(uniqueKey), surveyId);
+  await kvListAppend(c.env.KV, KVKeys.surveyList(), surveyId);
+  await kvPut(c.env.KV, KVKeys.stats(surveyId), { views: 0, starts: 0, submissions: 0 });
+
+  return c.json({ survey_id: surveyId, unique_key: uniqueKey, message: '导入成功' });
 });
+
+// generateUniqueKey 的本地引用
+function generateUniqueKey(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const arr = new Uint8Array(8);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => chars[b % chars.length]).join('');
+}
 
 export default importRoutes;
