@@ -1,268 +1,222 @@
-// API 客户端工具
+﻿const API_BASE = "https://survey-system.19355681226.workers.dev";
 
-const API_BASE = '/api';
-
-// 通用请求方法
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('admin_token');
-  const headers: Record<string, string> = {
-    ...((options?.headers as Record<string, string>) || {}),
-  };
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  
-  const response = await fetch(`${API_BASE}${url}`, {
-    ...options,
-    headers,
-  });
-  
-  const data = await response.json();
-  
-  if (!response.ok) {
-    throw new Error(data.error || '请求失败');
-  }
-  
-  return data as T;
+interface RequestOptions extends RequestInit {
+  headers?: Record<string, string>;
 }
 
-// 获取 user_uuid（自动创建）
+interface ApiResponse {
+  error?: string;
+  [key: string]: any;
+}
+
+async function request(url: string, options: RequestOptions = {}): Promise<ApiResponse> {
+  const token = localStorage.getItem("admin_token");
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string> || {}) };
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const response = await fetch(API_BASE + url, { ...options, headers });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
 export function getUserUuid(): string {
-  let uuid = localStorage.getItem('user_uuid');
-  if (!uuid) {
-    uuid = crypto.randomUUID();
-    localStorage.setItem('user_uuid', uuid);
-  }
+  let uuid = localStorage.getItem("user_uuid");
+  if (!uuid) { uuid = crypto.randomUUID(); localStorage.setItem("user_uuid", uuid); }
   return uuid;
 }
 
-// ============ 公开 API ============
-
-export async function getSurvey(uniqueKey: string) {
+export async function getSurvey(uniqueKey: string): Promise<ApiResponse> {
   const uuid = getUserUuid();
-  return request<{
-    id: string;
-    title: string;
-    description: string;
-    status: string;
-    questions: Array<{
-      id: string;
-      sort_order: number;
-      type: string;
-      title: string;
-      description: string;
-      required: number;
-      options: string[];
-      scale_min: number;
-      scale_max: number;
-      scale_min_label: string;
-      scale_max_label: string;
-    }>;
-  }>(`/survey/${uniqueKey}`, {
-    headers: { 'X-User-Uuid': uuid },
-  });
+  return request("/api/survey/" + uniqueKey, { headers: { "X-User-Uuid": uuid } });
 }
 
-export async function recordVisit(surveyId: string, eventType: string) {
-  const uuid = getUserUuid();
-  // 获取 unique_key（从缓存）
-  const uniqueKey = sessionStorage.getItem('current_survey_key');
+export async function recordVisit(surveyId: string, eventType: string): Promise<void> {
+  const uniqueKey = sessionStorage.getItem("current_survey_key");
   if (!uniqueKey) return;
-  
-  return request(`/survey/${uniqueKey}/visit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const uuid = getUserUuid();
+  await request("/api/survey/" + uniqueKey + "/visit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ event_type: eventType, user_uuid: uuid }),
   });
 }
 
-// ============ 草稿 API ============
-
-export async function getDraft(surveyId: string) {
+export async function getDraft(surveyId: string): Promise<ApiResponse> {
   const uuid = getUserUuid();
-  return request<{ draft: { answers: Record<string, any> } | null }>(
-    `/draft/${surveyId}/${uuid}`
-  );
+  return request("/api/draft/" + surveyId + "/" + uuid);
 }
 
-export async function saveDraft(surveyId: string, answers: Record<string, any>) {
+export async function saveDraft(surveyId: string, answers: Record<string, any>): Promise<void> {
   const uuid = getUserUuid();
-  return request('/draft', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  await request("/api/draft", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ survey_id: surveyId, user_uuid: uuid, answers }),
   });
 }
 
-// ============ 提交 API ============
-
-export async function submitResponse(surveyId: string, answers: Record<string, any>) {
+export async function submitResponse(surveyId: string, answers: Record<string, any>, uniqueKey?: string): Promise<void> {
   const uuid = getUserUuid();
-  return request<{ ok: boolean; message: string }>('/submit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ survey_id: surveyId, user_uuid: uuid, answers }),
+  await request("/api/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ survey_id: surveyId, unique_key: uniqueKey, user_uuid: uuid, answers }),
   });
 }
 
-// ============ 管理后台 API ============
-
-export async function adminLogin(username: string, password: string) {
-  const data = await request<{
-    token: string;
-    user: { id: string; username: string; display_name: string };
-  }>('/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+export async function adminLogin(username: string, password: string): Promise<ApiResponse> {
+  const data = await request("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  
-  localStorage.setItem('admin_token', data.token);
+  localStorage.setItem("admin_token", data.token);
   return data;
 }
 
-export async function adminLogout() {
-  localStorage.removeItem('admin_token');
+export async function adminLogout(): Promise<void> { localStorage.removeItem("admin_token"); }
+
+export async function getAdminMe(): Promise<ApiResponse> { return request("/api/auth/me"); }
+
+export async function getSurveys(page: number = 1, limit: number = 20, search: string = ""): Promise<ApiResponse> {
+  return request("/api/admin/surveys?page=" + page + "&limit=" + limit + "&search=" + encodeURIComponent(search));
 }
 
-export async function getAdminMe() {
-  return request<{ user: { id: string; username: string; display_name: string } }>('/auth/me');
-}
+export async function getSurveyDetail(id: string): Promise<ApiResponse> { return request("/api/admin/surveys/" + id); }
 
-export async function getSurveys(page = 1, limit = 20, search = '') {
-  return request<{
-    surveys: Array<{
-      id: string;
-      unique_key: string;
-      title: string;
-      description: string;
-      status: string;
-      created_at: string;
-      views: number;
-      submissions: number;
-    }>;
-    total: number;
-    page: number;
-    limit: number;
-  }>(`/admin/surveys?page=${page}&limit=${limit}&search=${search}`);
-}
-
-export async function getSurveyDetail(id: string) {
-  return request<any>(`/admin/surveys/${id}`);
-}
-
-export async function createSurvey(data: { title: string; description?: string; questions?: any[] }) {
-  return request<{ id: string; unique_key: string; message: string }>('/admin/surveys', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+export async function createSurvey(data: Record<string, any>): Promise<ApiResponse> {
+  return request("/api/admin/surveys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
 
-export async function updateSurvey(id: string, data: any) {
-  return request(`/admin/surveys/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+export async function updateSurvey(id: string, data: Record<string, any>): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + id, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 }
 
-export async function deleteSurvey(id: string) {
-  return request(`/admin/surveys/${id}`, { method: 'DELETE' });
+export async function deleteSurvey(id: string): Promise<void> { 
+  await request("/api/admin/surveys/" + id, { method: "DELETE" }); 
 }
 
-export async function updateQuestions(surveyId: string, questions: any[]) {
-  return request(`/admin/surveys/${surveyId}/questions`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+export async function updateQuestions(surveyId: string, questions: any[]): Promise<void> {
+  await request("/api/admin/surveys/" + surveyId + "/questions", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ questions }),
   });
 }
 
-export async function getSurveyStats(surveyId: string) {
-  return request<{
-    total_views: number;
-    total_starts: number;
-    total_submissions: number;
-    completion_rate: number;
-    status: string;
-    created_at: string;
-  }>(`/admin/surveys/${surveyId}/stats`);
+export async function getSurveyStats(surveyId: string): Promise<ApiResponse> { 
+  return request("/api/admin/surveys/" + surveyId + "/stats"); 
 }
 
-export async function getSurveyResponses(
-  surveyId: string,
-  page = 1,
-  limit = 20,
-  startDate?: string,
-  endDate?: string
-) {
-  let url = `/admin/surveys/${surveyId}/responses?page=${page}&limit=${limit}`;
-  if (startDate) url += `&start_date=${startDate}`;
-  if (endDate) url += `&end_date=${endDate}`;
-  return request<{
-    responses: Array<{
-      id: string;
-      user_uuid: string;
-      answers: Record<string, any>;
-      submitted_at: string;
-    }>;
-    total: number;
-  }>(url);
+export async function getSurveyResponses(surveyId: string, page: number = 1, limit: number = 20): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/responses?page=" + page + "&limit=" + limit);
 }
 
-export async function getExportData(surveyId: string) {
-  return request<any>(`/admin/surveys/${surveyId}/export`);
+export async function getExportData(surveyId: string): Promise<ApiResponse> { 
+  return request("/api/admin/surveys/" + surveyId + "/export"); 
 }
 
-// ============ 导入 API ============
-
-export async function getImportPresign(filename: string, contentType: string) {
-  return request<{ import_id: string; r2_key: string; upload_url: string }>(
-    '/admin/import/presign',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename, content_type: contentType }),
-    }
-  );
-}
-
-export async function uploadFile(importId: string, file: File) {
+export async function uploadAndParseFile(file: File): Promise<ApiResponse> {
   const formData = new FormData();
-  formData.append('file', file);
-  
-  return request<{ message: string }>(`/admin/import/upload/${importId}`, {
-    method: 'POST',
-    body: formData,
+  formData.append("file", file);
+  return request("/api/admin/import/upload", { method: "POST", body: formData });
+}
+
+export async function confirmImport(data: Record<string, any>): Promise<ApiResponse> {
+  return request("/api/admin/import/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
   });
 }
 
-export async function parseImportFile(importId: string) {
-  return request<{
-    import_id: string;
-    title: string;
-    description: string;
-    questions: any[];
-  }>(`/admin/import/parse/${importId}`, {
-    method: 'POST',
+export async function getCodingThemes(surveyId: string): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/themes");
+}
+
+export async function updateCodingThemes(surveyId: string, themes: any[]): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/themes", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ themes }),
   });
 }
 
-export async function confirmImport(data: {
-  import_id: string;
-  title: string;
-  description?: string;
-  questions: any[];
-}) {
-  return request<{ survey_id: string; unique_key: string; message: string }>(
-    '/admin/import/confirm',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }
-  );
+export async function getCodingDataset(surveyId: string, questionId: string): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/coding/" + questionId);
+}
+
+export async function runAiCoding(surveyId: string, questionId: string): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/coding/" + questionId + "/run", {
+    method: "POST",
+  });
+}
+
+export async function updateCodingResult(surveyId: string, questionId: string, responseId: string, themes: string[], keywords?: string[]): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/coding/" + questionId + "/result/" + responseId, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ themes, keywords }),
+  });
+}
+
+export async function exportCodingDataset(surveyId: string, questionId: string, format: string = "csv"): Promise<Response> {
+  const token = localStorage.getItem("admin_token");
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  return fetch(API_BASE + "/api/admin/surveys/" + surveyId + "/coding/" + questionId + "/export?format=" + format, { headers });
+}
+
+export async function deleteCodingResults(surveyId: string, questionId: string, responseIds: string[]): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/coding/" + questionId + "/results", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ responseIds }),
+  });
+}
+
+export async function getAnomalyRules(): Promise<ApiResponse> {
+  return request("/api/admin/rules");
+}
+
+export async function runQualityScan(surveyId: string): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/scan", {
+    method: "POST",
+  });
+}
+
+export async function getQualityReport(surveyId: string): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/report");
+}
+
+export async function flagResponse(surveyId: string, responseId: string, isFlagged: boolean, flagReasons?: string[]): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/responses/" + responseId + "/flag", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_flagged: isFlagged, flag_reasons: flagReasons }),
+  });
+}
+
+export async function batchFlagResponses(surveyId: string, responseIds: string[], isFlagged: boolean, flagReasons?: string[]): Promise<ApiResponse> {
+  return request("/api/admin/surveys/" + surveyId + "/responses/batch-flag", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ responseIds, is_flagged: isFlagged, flag_reasons: flagReasons }),
+  });
+}
+
+export async function exportQualityReport(surveyId: string, format: string = "csv"): Promise<Response> {
+  const token = localStorage.getItem("admin_token");
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  return fetch(API_BASE + "/api/admin/surveys/" + surveyId + "/export?format=" + format, { headers });
 }
 

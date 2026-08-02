@@ -1,96 +1,113 @@
-﻿# ============================================
-# 🚀 问卷系统一键部署脚本（KV 版 - 修复）
-# ============================================
-
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Continue"
 Set-Location $PSScriptRoot
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  📋 问卷系统 - Cloudflare KV 部署" -ForegroundColor Cyan
+Write-Host "  Survey System - Cloudflare KV Deploy" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 检查环境
-Write-Host "🔍 检查环境..." -ForegroundColor Yellow
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Write-Host "❌ 请先安装 Node.js >= 18"; exit 1 }
-Write-Host "  ✅ Node.js $(node --version)" -ForegroundColor Green
+# [1] Install root deps
+Write-Host "[1/8] Installing dependencies..." -ForegroundColor Yellow
+& npm install 2>$null
+Write-Host "  OK" -ForegroundColor Green
 
-if (-not (Get-Command wrangler -ErrorAction SilentlyContinue)) {
-    Write-Host "📦 安装 Wrangler..." -ForegroundColor Yellow
-    npm install -g wrangler
+# [2] Login check
+Write-Host "[2/8] Checking login..." -ForegroundColor Yellow
+& wrangler whoami 2>$null
+Write-Host "  OK" -ForegroundColor Green
+
+# [3] Get KV namespace ID
+Write-Host "[3/8] Getting KV namespace..." -ForegroundColor Yellow
+
+$existingId = $null
+if (Test-Path wrangler.toml) {
+    $tomlContent = Get-Content wrangler.toml -Raw
+    if ($tomlContent -match 'id\s*=\s*"([a-f0-9]{32})"') {
+        $existingId = $Matches[1]
+        Write-Host "  Found existing KV ID: $existingId" -ForegroundColor Green
+    }
 }
-Write-Host "  ✅ Wrangler $(wrangler --version)" -ForegroundColor Green
 
-# 检查登录
-Write-Host ""
-Write-Host "🔐 检查 Cloudflare 登录..." -ForegroundColor Yellow
-wrangler whoami 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { wrangler login }
-Write-Host "  ✅ 已登录" -ForegroundColor Green
+$kvId = $existingId
 
-# 创建 KV 命名空间
-Write-Host ""
-Write-Host "📦 创建 KV 命名空间..." -ForegroundColor Yellow
-$kvOutput = wrangler kv namespace create KV 2>&1
-Write-Host $kvOutput
+if (-not $kvId) {
+    $kvId = $null
+    $createOutput = & wrangler kv namespace create KV 2>&1 | Out-String
+    Write-Host "  Create output: $createOutput" -ForegroundColor Gray
+    
+    if ($createOutput -match '"id"\s*:\s*"([^"]+)"') { $kvId = $Matches[1] }
+    if (-not $kvId -and $createOutput -match 'id\s*=\s*"([^"]+)"') { $kvId = $Matches[1] }
+    if (-not $kvId -and $createOutput -match "id:\s*(\w+)") { $kvId = $Matches[1] }
+    
+    if (-not $kvId) {
+        Write-Host "  Trying to list existing namespaces..." -ForegroundColor Yellow
+        $listOutput = & wrangler kv namespace list 2>&1 | Out-String
+        Write-Host "  List output: $listOutput" -ForegroundColor Gray
+        
+        if ($listOutput -match '"id"\s*:\s*"([^"]+)"') { $kvId = $Matches[1] }
+        if (-not $kvId -and $listOutput -match 'id\s*=\s*"([^"]+)"') { $kvId = $Matches[1] }
+        if (-not $kvId -and $listOutput -match "id:\s*(\w+)") { $kvId = $Matches[1] }
+    }
+}
 
-$kvLine = $kvOutput | Select-String 'id\s*=\s*"([^"]+)"'
-if (-not $kvLine) {
-    Write-Host "❌ 无法获取 KV namespace ID" -ForegroundColor Red
+if (-not $kvId) {
+    Write-Host "  Cannot get KV ID automatically." -ForegroundColor Red
+    Write-Host "  Please run manually: wrangler kv namespace list" -ForegroundColor Yellow
     exit 1
 }
-$kvId = $kvLine.Matches[0].Groups[1].Value
-Write-Host "  ✅ KV Namespace ID: $kvId" -ForegroundColor Green
+Write-Host "  KV ID: $kvId" -ForegroundColor Green
 
-# 更新 wrangler.toml
-Write-Host ""
-Write-Host "📝 更新 wrangler.toml..." -ForegroundColor Yellow
+# [4] Update wrangler.toml
+Write-Host "[4/8] Updating config..." -ForegroundColor Yellow
 $content = Get-Content wrangler.toml -Raw
 $content = $content -replace 'YOUR_KV_NAMESPACE_ID', $kvId
-[System.IO.File]::WriteAllText("wrangler.toml", $content, [System.Text.UTF8Encoding]::new($false))
-Write-Host "  ✅ 配置已更新" -ForegroundColor Green
+Set-Content wrangler.toml -Value $content -Encoding UTF8 -NoNewline
+Write-Host "  OK" -ForegroundColor Green
 
-# 部署 Worker（不加 --no-bundle，让 Wrangler 自动编译 TypeScript）
-Write-Host ""
-Write-Host "🚀 部署 Worker API..." -ForegroundColor Yellow
-wrangler deploy
-Write-Host "  ✅ Worker 已部署" -ForegroundColor Green
+# [5] Deploy Worker
+Write-Host "[5/8] Deploying Worker..." -ForegroundColor Yellow
+& wrangler deploy 2>&1 | ForEach-Object {
+    if ($_ -match "ERROR") { Write-Host $_ -ForegroundColor Red }
+    elseif ($_ -match "Published") { Write-Host $_ -ForegroundColor Green }
+}
+Write-Host "  OK" -ForegroundColor Green
 
-# 初始化默认管理员
-Write-Host ""
-Write-Host "👤 初始化管理员账号..." -ForegroundColor Yellow
+# [6] Init admin
+Write-Host "[6/8] Initializing admin..." -ForegroundColor Yellow
 $workerName = (Select-String -Path wrangler.toml -Pattern '^name\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 $workerUrl = "https://${workerName}.workers.dev"
 Start-Sleep -Seconds 3
 try {
-    $initResult = Invoke-RestMethod -Uri "$workerUrl/api/init" -Method Get
-    Write-Host "  ✅ $($initResult.message)" -ForegroundColor Green
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $resp = Invoke-RestMethod -Uri "$workerUrl/api/init" -Method Get -TimeoutSec 10
+    Write-Host "  $($resp.message)" -ForegroundColor Green
 } catch {
-    Write-Host "  ⚠️ 请稍后手动访问: $workerUrl/api/init" -ForegroundColor Yellow
+    Write-Host "  Visit manually: $workerUrl/api/init" -ForegroundColor Yellow
 }
 
-# 构建前端
-Write-Host ""
-Write-Host "🔨 构建前端..." -ForegroundColor Yellow
-cd web
-npm install
-npm run build
-cd ..
-Write-Host "  ✅ 前端构建完成" -ForegroundColor Green
+# [7] Build frontend
+Write-Host "[7/8] Building frontend..." -ForegroundColor Yellow
+Set-Location web
+& npm install 2>$null
+& npm run build 2>&1 | ForEach-Object { if ($_ -match "error") { Write-Host $_ -ForegroundColor Red } }
+Set-Location ..
+Write-Host "  OK" -ForegroundColor Green
 
-# 部署 Pages
-Write-Host ""
-Write-Host "🚀 部署前端到 Cloudflare Pages..." -ForegroundColor Yellow
-wrangler pages deploy web/dist --project-name survey-system
-Write-Host "  ✅ 前端已部署" -ForegroundColor Green
+# [8] Deploy Pages
+Write-Host "[8/8] Deploying Pages..." -ForegroundColor Yellow
+& wrangler pages deploy web/dist --project-name survey-system 2>&1 | ForEach-Object {
+    if ($_ -match "ERROR") { Write-Host $_ -ForegroundColor Red }
+    elseif ($_ -match "Published|deployed") { Write-Host $_ -ForegroundColor Green }
+}
+Write-Host "  OK" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  🎉 部署完成！" -ForegroundColor Green
+Write-Host "  DEPLOY COMPLETE!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  📋 后台管理: https://survey-system.pages.dev/admin" -ForegroundColor Cyan
-Write-Host "  🌐 Worker API: $workerUrl" -ForegroundColor Cyan
-Write-Host "  🔑 登录账号: admin / admin123456" -ForegroundColor Cyan
+Write-Host "  Admin: https://survey-system.pages.dev/admin" -ForegroundColor Cyan
+Write-Host "  API:   $workerUrl" -ForegroundColor Cyan
+Write-Host "  Login: admin / admin123456" -ForegroundColor Cyan
 Write-Host ""

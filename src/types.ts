@@ -1,8 +1,4 @@
-// ============================================
-// 共享类型定义（KV 存储版）
-// ============================================
-
-export interface Env {
+﻿export interface Env {
   KV: KVNamespace;
   JWT_SECRET: string;
 }
@@ -12,6 +8,7 @@ export interface AdminUser {
   username: string;
   password_hash: string;
   display_name: string;
+  role?: 'admin' | 'user';
 }
 
 export interface Survey {
@@ -39,6 +36,26 @@ export interface Question {
   scale_max: number;
   scale_min_label: string;
   scale_max_label: string;
+  visible?: number;
+  skip_logic?: SkipLogic[];
+  show_logic?: ShowLogic[];
+}
+
+export interface SkipLogic {
+  id: string;
+  source_question_id: string;
+  condition: 'equals' | 'not_equals' | 'contains' | 'greater_than' | 'less_than';
+  condition_value: string;
+  target_question_id: string;
+  action: 'skip_to' | 'end';
+}
+
+export interface ShowLogic {
+  id: string;
+  source_question_id: string;
+  condition: 'equals' | 'not_equals' | 'contains';
+  condition_value: string;
+  target_question_id: string;
 }
 
 export interface Draft {
@@ -54,6 +71,9 @@ export interface SurveyResponse {
   user_uuid: string;
   answers: Record<string, any>;
   submitted_at: string;
+  duration_seconds?: number;
+  is_flagged?: boolean;
+  flag_reasons?: string[];
 }
 
 export interface SurveyStats {
@@ -65,6 +85,7 @@ export interface SurveyStats {
 export interface JwtPayload {
   sub: string;
   username: string;
+  role?: string;
   iat: number;
   exp: number;
 }

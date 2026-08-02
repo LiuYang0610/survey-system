@@ -9,6 +9,9 @@ import SurveyEdit from './pages/admin/SurveyEdit';
 import SurveyImport from './pages/admin/SurveyImport';
 import SurveyStats from './pages/admin/SurveyStats';
 import ResponseList from './pages/admin/ResponseList';
+import AiCoding from './pages/admin/AiCoding';
+import DataQuality from './pages/admin/DataQuality';
+import UserManage from './pages/admin/UserManage';
 
 function App() {
   return (
@@ -28,6 +31,9 @@ function App() {
           <Route path="survey/:id/import" element={<SurveyImport />} />
           <Route path="survey/:id/stats" element={<SurveyStats />} />
           <Route path="survey/:id/responses" element={<ResponseList />} />
+          <Route path="survey/:id/ai-coding" element={<AiCoding />} />
+          <Route path="survey/:id/data-quality" element={<DataQuality />} />
+          <Route path="users" element={<UserManage />} />
         </Route>
         
         {/* 默认路由 */}
